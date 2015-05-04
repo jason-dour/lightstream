@@ -37,7 +37,7 @@ Find.find("#{ENV['HOME']}/Library/Application Support/iLifeAssetManagement/") do
 end
 
 # If the directory of Lightstream files does not exist, let's get it going.
-def prepare_for_lightstream()
+def initialize_lightstream()
   # First, make the directory to contain our data.
   Dir.mkdir($workdir)
 
@@ -60,19 +60,43 @@ def prepare_for_lightstream()
   return
 end
 
-# Scan the local iCloud cache to look for new photos.
+# Scan the local iCloud cache to look for new photostream photos.
 def scan_photostream_cache()
   retset = Hash.new
 
   psstm = $psdb.prepare "select uuid, filename from AMAsset where downloadState <> 5 order by modelId;"
+
   psrs = psstm.execute
+
   psrs.each do |row|
     file = "#{$icloudcache}/assets/sub/#{row[0]}/#{row[1]}"
     if File.exists?(file)
       retset["#{row[0]}"] = file
     end
   end
+
   psstm.close
+
+  return retset
+end
+
+# Scan the local iCloud cache for new share stream photos.
+def scan_sharestream_cache()
+  retset = Hash.new
+
+  shstm = $shdb.prepare "select albumGUID, GUID from AssetCollections order by albumGUID, batchDate, photoDate;"
+
+  shrs = shstm.execute
+
+  shrs.each do |row|
+    if retset.has_key?("#{row[0]}")
+      retset["#{row[0]}"].concat(" #{row[1]}")
+    else
+      retset["#{row[0]}"] = String.new("#{row[1]}")
+    end
+  end
+
+  shstm.close
 
   return retset
 end
@@ -81,16 +105,17 @@ end
 begin
   # Prepare for Lightstream operations by creating files if necessary.
   if ! File.directory?($workdir)
-    prepare_for_lightstream()
+    initialize_lightstream()
   end
 
   # Open our database connections.
-  $lsdb = SQLite3::Database.new $lightstream
-  $psdb = SQLite3::Database.new $photostream
-  $shdb = SQLite3::Database.new $sharestream
+  $lsdb = SQLite3::Database.open $lightstream
+  $psdb = SQLite3::Database.open $photostream
+  $shdb = SQLite3::Database.open $sharestream
 
   # Scan the current iCloud assets.
-  newphotos = scan_photostream_cache()
+  pscontents = scan_photostream_cache()
+  sscontents = scan_sharestream_cache()
 
 rescue SQLite3::Exception => e
   puts "Exception occurred"

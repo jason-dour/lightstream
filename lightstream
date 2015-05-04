@@ -1,0 +1,104 @@
+#!/usr/bin/ruby
+#
+# lightstream - scan local cache of iCloud files and import them into Lightroom.
+#
+# Jason A. Dour - jason@oddgeek.info
+
+# Required libraries.
+require 'sqlite3'
+require 'find'
+
+# Working directory.
+$workdir = "#{ENV['HOME']}/.lightstream"
+
+# Lightstream database.
+$lightstream = "#{$workdir}/lightstream.db"
+
+# Get the iCloud ID of the user.
+Find.find("#{ENV['HOME']}/Library/Application Support/iCloud/Accounts") do |accounts|
+  if File.basename(accounts).match("^[0-9]*$")
+    $icid = File.basename(accounts)
+  end
+end
+
+# iCloud Asset Cache
+$icloudcache = "#{ENV['HOME']}/Library/Application Support/iLifeAssetManagement"
+# iCloud Photostream database.
+$photostream = "#{$icloudcache}/iLifeAssetManagement.db"
+
+# iCloud Photo Sharing database.
+# ...look in the subfolders of iLifeAssetManagement to find...
+Find.find("#{ENV['HOME']}/Library/Application Support/iLifeAssetManagement/") do |findloop|
+  # ...the Model.sqlite file...
+  if findloop.match("Model.sqlite$")
+    # ...it is our Photo Sharing database
+    $sharestream = findloop
+  end
+end
+
+# If the directory of Lightstream files does not exist, let's get it going.
+def prepare_for_lightstream()
+  # First, make the directory to contain our data.
+  Dir.mkdir($workdir)
+
+  # Let's create the database.
+  lsdb = SQLite3::Database.new $lightstream
+
+  # Create the photostream table.
+  lscmd = lsdb.prepare 'CREATE TABLE photostream(uuid, filename, imported);'
+  lsrs = lscmd.execute
+  lscmd.close
+
+  # Create the shared streams table.
+  lscmd = lsdb.prepare 'CREATE TABLE shared(uuid, album, filename, imported);'
+  lsrs = lscmd.execute
+  lscmd.close
+
+  # Close the database.
+  lsdb.close
+
+  return
+end
+
+# Scan the local iCloud cache to look for new photos.
+def scan_photostream_cache()
+  retset = Hash.new
+
+  psstm = $psdb.prepare "select uuid, filename from AMAsset where downloadState <> 5 order by modelId;"
+  psrs = psstm.execute
+  psrs.each do |row|
+    file = "#{$icloudcache}/assets/sub/#{row[0]}/#{row[1]}"
+    if File.exists?(file)
+      retset["#{row[0]}"] = file
+    end
+  end
+  psstm.close
+
+  return retset
+end
+
+# MAIN
+begin
+  # Prepare for Lightstream operations by creating files if necessary.
+  if ! File.directory?($workdir)
+    prepare_for_lightstream()
+  end
+
+  # Open our database connections.
+  $lsdb = SQLite3::Database.new $lightstream
+  $psdb = SQLite3::Database.new $photostream
+  $shdb = SQLite3::Database.new $sharestream
+
+  # Scan the current iCloud assets.
+  newphotos = scan_photostream_cache()
+
+rescue SQLite3::Exception => e
+  puts "Exception occurred"
+  puts e
+
+ensure
+  $lsdb.close if $lsdb
+  $psdb.close if $psdb
+  $shdb.close if $shdb
+
+end

@@ -117,6 +117,9 @@ begin
   pscontents = scan_photostream_cache()
   sscontents = scan_sharestream_cache()
 
+  # Note: Adjust times from the tables by +978307200.
+  #       To account for different epoch time used in database.
+  
 rescue SQLite3::Exception => e
   puts "Exception occurred"
   puts e

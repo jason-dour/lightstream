@@ -64,14 +64,17 @@ end
 def scan_photostream_cache()
   retset = Hash.new
 
-  psstm = $psdb.prepare "select uuid, filename from AMAsset where downloadState <> 5 order by modelId;"
+  psstm = $psdb.prepare "select uuid, filename, creationDate from AMAsset where downloadState <> 5 order by modelId;"
 
   psrs = psstm.execute
 
   psrs.each do |row|
+    # Note: Adjust times from the tables by +978307200.
+    #       To account for different epoch time used in database.
+    row[2] += 978307200
     file = "#{$icloudcache}/assets/sub/#{row[0]}/#{row[1]}"
     if File.exists?(file)
-      retset["#{row[0]}"] = file
+      retset["#{row[0]}"] = file.concat(",").concat(row[2].to_s)
     end
   end
 
@@ -83,6 +86,17 @@ end
 # Scan the local iCloud cache for new share stream photos.
 def scan_sharestream_cache()
   retset = Hash.new
+  albums = Hash.new
+
+  shstm = $shdb.prepare "select GUID, name from Albums;"
+
+  shrs = shstm.execute
+
+  shrs.each do |row|
+    albums["#{row[0]}"] = row[1]
+  end
+
+  shstm.close
 
   shstm = $shdb.prepare "select albumGUID, GUID from AssetCollections order by albumGUID, batchDate, photoDate;"
 
@@ -90,9 +104,9 @@ def scan_sharestream_cache()
 
   shrs.each do |row|
     if retset.has_key?("#{row[0]}")
-      retset["#{row[0]}"].concat(" #{row[1]}")
+      retset["#{row[0]}"].concat(",#{row[1]}")
     else
-      retset["#{row[0]}"] = String.new("#{row[1]}")
+      retset["#{row[0]}"] = String.new("#{albums["#{row[0]}"]},#{row[1]}")
     end
   end
 
@@ -117,16 +131,14 @@ begin
   pscontents = scan_photostream_cache()
   sscontents = scan_sharestream_cache()
 
-  # Note: Adjust times from the tables by +978307200.
-  #       To account for different epoch time used in database.
-  
-rescue SQLite3::Exception => e
-  puts "Exception occurred"
-  puts e
 
-ensure
-  $lsdb.close if $lsdb
-  $psdb.close if $psdb
-  $shdb.close if $shdb
+  rescue SQLite3::Exception => e
+    puts "Exception occurred"
+    puts e
+
+  ensure
+    $lsdb.close if $lsdb
+    $psdb.close if $psdb
+    $shdb.close if $shdb
 
 end
